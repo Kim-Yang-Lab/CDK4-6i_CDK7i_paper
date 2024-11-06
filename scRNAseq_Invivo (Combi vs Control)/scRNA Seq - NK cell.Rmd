@@ -1,0 +1,116 @@
+---
+title: "scRNA Seq - NK Cell"
+output: html_document
+date: "2024-11-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Re-normalize}
+NK_cells <- subset(test1, idents = c("NK Cells"))
+DefaultAssay(NK_cells) <- "RNA"
+NK_cells <- SCTransform(NK_cells, vars.to.regress = "percent.mt", verbose = TRUE)
+NK_cells <- RunPCA(NK_cells, verbose = FALSE)
+ElbowPlot(NK_cells, ndims = 50)
+```
+
+```{r UMAP, Findneighbors}
+NK_t <- RunUMAP(NK_cells,
+              dims = 1:20,
+              min.dist = 0.5,
+              n.neighbors = 10L,
+              reduction = "pca")
+
+NK_p<-DimPlot(NK_t,
+            reduction="umap",
+            group.by = "condition") 
+# Find neighbors and clusters
+NK_t <- FindNeighbors(NK_t, dims = 1:20, new.reduction="integrated.cca")
+
+```
+
+```{r Remove Contaminates}
+NK_4 <- FindClusters(NK_t, resolution = 0.4)
+
+DefaultAssay(NK_4) <- "SCT"
+gene<-c("Ncr1")
+p1<-VlnPlot(NK_4, assay = 'SCT',features =gene, pt.size=0, group.by="seurat_clusters")
+p2<-FeaturePlot(NK_4, features = gene, slot="data")
+pall<-p1+p2
+
+cells_to_keep <- WhichCells(NK_4, idents = c("1", "2" ))
+nk_sub <- subset(NK_4, cells = cells_to_keep)
+```
+
+```{r Re-normalize}
+DefaultAssay(nk_sub) <- "RNA"
+nk_sub <- SCTransform(nk_sub, vars.to.regress = "percent.mt", verbose = TRUE)
+nk_sub <- RunPCA(nk_sub, verbose = FALSE)
+ElbowPlot(nk_sub, ndims = 50)
+
+NK_sub <- RunUMAP(nk_sub,
+              dims = 1:20,
+              min.dist = 0.5,
+              n.neighbors = 10L,
+              reduction = "pca")
+
+# Find neighbors and clusters
+NK_sub <- FindNeighbors(NK_sub, dims = 1:20, new.reduction="integrated.cca")
+clus<-NK_sub
+NK_sub_clust6 <- FindClusters(clus, resolution = 0.6)
+
+DefaultAssay(NK_sub_clust6) <- "SCT"
+gene<-c("Cd27")
+p1<-FeaturePlot(NK_sub_clust6, features = gene, slot="data", cols = c("grey", "#B93232"))
+p2<-VlnPlot(NK_sub_clust6, assay = 'SCT',features =gene, pt.size=0, group.by="seurat_clusters")
+pall<-p1+p2
+
+```
+
+```{r Cell Count}
+nk_SUB_SCT <- NK_sub_clust6
+
+genes_OF <- c("Cd27", "Cd11b","Gzmb","Prf1")
+threshold <- 0.5
+combined_data <- FetchData(nk_SUB_SCT, vars = c(genes_OF), slot = "data")
+metadata <- nk_SUB_SCT@meta.data
+
+combined_data <- cbind(metadata, combined_data)
+combined_data_filtered <- combined_data[apply(combined_data[, genes_OF], 1, function(x) any(x > threshold)), ]
+combined_data_filtered <- combined_data_filtered[, c("condition", "celltype", genes_OF)]
+combined_data_long <- melt(combined_data_filtered, id.vars = c("condition", "celltype"), 
+                                 variable.name = "gene", 
+                                 value.name = "expression")# Generate the ridge 
+library(ggridges)
+ridge_plot <- ggplot(combined_data_long, aes(x = expression, y = gene, fill = condition)) + geom_density_ridges(scale = 1.25, rel_min_height = 0.01, alpha = 0.5) + # Adjust the ridge plot scale and density
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "black", size = 0.8) + # Add vertical line at 0.5 
+  theme_ridges() + # Ridge theme 
+  scale_fill_manual(values = c("control" = "blue", "experimental" = "red")) + # Define colors for control and experimental 
+  theme(legend.position = "right", # Place the legend on the right 
+        strip.background = element_blank(), 
+        strip.text = element_text(size = 10)) + # Adjust facet label text size 
+  labs(title = "Gene Expression across NK Cell Subpopulations", 
+       x = "Expression Level", 
+       y = "Genes")
+
+histogram_plot <- ggplot(combined_data_long, aes(x = expression, fill = condition)) + 
+  geom_histogram(position = "identity", alpha = 0.5, bins = 100) + # Increase the number of bins 
+  facet_wrap(~ gene, scales = "free_x") + 
+  scale_fill_manual(values = c("control" = "blue", "experimental" = "red")) + 
+  labs(title = "Gene Expression Distribution across NK Cell Subpopulations", 
+       x = "Expression Level", y = "Cell Count") + 
+  scale_x_continuous(breaks = seq(0, 2, by = 0.1)) + # Set finer x-axis breaks 
+  theme_minimal() + 
+  theme(legend.position = "right",
+        strip.background = element_blank(), 
+        strip.text = element_text(size = 10))
+
+cells_above_below_threshold <- combined_data %>% 
+  filter(Gzmb > 0.5 | Prf1 > 0.5)%>% 
+  group_by(condition) %>% 
+  summarise(cell_count = n())
+
+
+```

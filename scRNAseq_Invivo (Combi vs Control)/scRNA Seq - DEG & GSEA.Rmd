@@ -1,0 +1,137 @@
+---
+title: "scRNA Seq - DEG & GSEA"
+output: html_document
+date: "2024-11-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+path<-"C:/Users/es4218/OneDrive - Columbia University Irving Medical Center/1-5. CDK4i+CDK7i bresat cancer/scRNA-seq/Script/Saves 10042024/DEG and GSEA/"
+```
+
+```{r Aggregate}
+library(DESeq2)
+pseudo_counts <- AggregateExpression(
+  object = t1.rename,
+  assays = "RNA",
+  return.seurat = FALSE,
+  slot="counts",
+  group.by = c("celltype","orig.ident")
+  #group.by="orig.ident"
+)
+pseudo_counts<- pseudo_counts$RNA
+#pseudo_counts<-as.data.frame(pseudo_counts) 
+pseudo_counts.t<-t(pseudo_counts)
+pseudo_counts.t<-as.data.frame(pseudo_counts.t)
+
+splitRows<- gsub('_.*','', rownames(pseudo_counts.t))
+
+#split datafram
+pseudo_counts.split<- split.data.frame(pseudo_counts.t,
+                 f=factor(splitRows))
+
+#re-transpose
+pseudo_counts.split.mod<-lapply(pseudo_counts.split, function(x){
+  rownames(x)<-gsub('.*_(.*)','\\1',rownames(x))
+  t(x)
+})
+```
+
+```{r DESEQ}
+countmatrix<-pseudo_counts.split.mod$`Cancer Cells`
+coldata <- DataFrame(group=factor(c("control","experimental","control","experimental")),rep=factor(c("rep1","rep1","rep2","rep2")))
+
+coldata$group <- relevel(coldata$group, ref = "control")
+dds <- DESeqDataSetFromMatrix(countData = countmatrix,
+                              colData = coldata, 
+                              design = ~ rep + group)
+dds <- DESeq(dds)
+res <-  lfcShrink(dds, coef="group_experimental_vs_control", type="apeglm") 
+c.cells<-na.omit(res)
+```
+
+```{r GSEA}
+DEG_list <- list(c.cells)
+library(clusterProfiler)
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(msigdbr)
+prepare_gene_list <- function(DEG) {
+  DEG_list <- DEG[order(-DEG$log2FoldChange),]
+  entrez_id <- mapIds(org.Mm.eg.db, 
+                      keys = rownames(DEG_list), 
+                      column = "ENTREZID", 
+                      keytype = "SYMBOL",
+                      multiVals = "first")
+  entrez_id <- entrez_id[!is.na(entrez_id)]
+  DEG_list <- DEG_list[rownames(DEG_list) %in% names(entrez_id), ]
+  rownames(DEG_list) <- entrez_id
+  geneList <- DEG_list$log2FoldChange
+  names(geneList) <- rownames(DEG_list)
+  geneList <- na.omit(geneList)
+  return(geneList)
+}
+results_1 <- list() 
+hallmark_genesets <- msigdbr(species = "mouse", category = "H")
+hallmark_list <- hallmark_genesets %>%dplyr::select(gs_name, entrez_gene, gene_symbol)
+for (i in seq_along(DEG_list)) {
+  geneList <- prepare_gene_list(DEG_list[[i]])
+  set.seed(i) # Set a different seed for each iteration
+      results_1[[i]] <- GSEA(geneList,
+                   TERM2GENE = hallmark_list[,c("gs_name", "entrez_gene")],
+                   pvalueCutoff = 0.05, 
+                   minGSSize = 15,
+                   maxGSSize = 500,
+                   nPerm = 10000)
+}
+
+library(enrichplot)
+p1 <- gseaplot(
+  results_1[[1]],               
+  geneSetID = 2,
+  title = ""
+)
+p2 <- gseaplot(
+  results_1[[1]],               
+  geneSetID = 3,
+  title = ""
+)
+```
+
+```{r volcano}
+res<-c.cells
+res_up<-subset(res, padj<0.05 &log2FoldChange>1)
+res_down<-subset(res, padj<0.05 &log2FoldChange< -1)
+###
+label<-c("Icam1","Cxcl2","Cxcl9","Cxcl10","Cxcl11","Ciita")
+up<-res_up[rownames(res_up)%in%label,]
+
+keyvals.colour <- ifelse(
+  rownames(res) %in% rownames(res_up) & rownames(res) %in% label, 'green',
+  ifelse(rownames(res) %in% rownames(res_down) & rownames(res) %in% label, 'red', 'grey')
+)
+names(keyvals.colour) <- rownames(res)
+library(EnhancedVolcano)
+volcano<-EnhancedVolcano(res,
+                         lab = rownames(res),
+                         title="",
+                         subtitle="",
+                         x = 'log2FoldChange',
+                         y = 'padj',
+                         selectLab = label,
+                         colCustom = keyvals.colour,
+                         pCutoff = 0.05,
+                         widthConnectors = 0.75,
+                         legendPosition = 'none',
+                         FCcutoff=1,
+                         xlim = (c(-2,4)),
+                         ylim = (c(0,8))
+                         )
+pdf(paste0(path,"volcano.pdf"), width = 6, height = 4)
+volcano
+dev.off()
+```

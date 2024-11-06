@@ -1,0 +1,128 @@
+---
+title: "scRNA Seq - B Cell"
+output: html_document
+date: "2024-11-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Re-Normalize}
+B_cells <- subset(t1.rename, idents = c("B Cells"))
+DefaultAssay(B_cells) <- "RNA"
+B_cells <- SCTransform(B_cells, vars.to.regress = "percent.mt", verbose = TRUE)
+B_cells <- RunPCA(B_cells, verbose = FALSE)
+ElbowPlot(B_cells, ndims = 50)
+```
+
+```{r UMAP, Findneighbors}
+b_t1 <- RunUMAP(B_cells,
+              dims = 1:20,
+              min.dist = 0.25,
+              n.neighbors = 10L,
+              reduction = "pca")
+
+b_p1<-DimPlot(b_t1,
+            reduction="umap",
+            group.by = "condition") 
+# Find neighbors and clusters
+b_t1 <- FindNeighbors(b_t1, dims = 1:20, new.reduction="integrated.cca")
+
+```
+
+```{r Filter out contaminates}
+b_6a <- FindClusters(b_t1, resolution = 0.4)
+
+DefaultAssay(b_6a) <- "SCT"
+gene<-c("Cd79a")
+p2<-VlnPlot(b_6a, assay = 'SCT',features =gene, pt.size=0, group.by="seurat_clusters")
+p3<-FeaturePlot(b_6a, features = gene)
+pall<-b_p1+p3+p2
+
+cells_to_keep <- WhichCells(b_6a, idents = c("0", "1", "3","4","5","6","7"))
+b_sub <- subset(b_6a, cells = cells_to_keep)
+```
+
+```{r Re-normalize}
+DefaultAssay(b_sub) <- "RNA"
+b_sub <- SCTransform(b_sub, vars.to.regress = "percent.mt", verbose = TRUE)
+b_sub <- RunPCA(b_sub, verbose = FALSE)
+ElbowPlot(b_sub, ndims = 50)
+
+b_sub <- RunUMAP(b_sub,
+              dims = 1:20,
+              min.dist = 0.25,
+              n.neighbors = 10L,
+              reduction = "pca")
+
+b_p1<-DimPlot(b_sub,
+            reduction="umap",
+            group.by = "condition") 
+
+# Find neighbors and clusters
+b_sub <- FindNeighbors(b_sub, dims = 1:20, new.reduction="integrated.cca")
+
+b_sub_5 <- FindClusters(b_sub, resolution = 0.5)
+b_p1<-DimPlot(b_sub_5,
+            reduction="umap",label=T) 
+
+DefaultAssay(b_sub_5) <- "SCT"
+gene<-c("Cd19")
+p2<-VlnPlot(b_sub_5, assay = 'SCT',features =gene, pt.size=0, group.by="seurat_clusters")
+p3<-FeaturePlot(b_sub_5, features = gene, cols = c("grey", "#B93232"))
+pall<-b_p1+p3+p2
+```
+
+
+```{r Cell count}
+genes_OF <- c("Ms4a1","Ighm","Cd24a","Ighd","Cd83","Cd69")
+expression_data <- FetchData(b_sub_5, vars = genes_OF, slot = "data")
+metadata <- b_sub_5@meta.data
+
+# Combine metadata with expression data
+combined_data <- cbind(metadata, expression_data)
+threshold<-0.5
+# Filter the combined data for expression levels greater than 1 for any gene
+combined_data_filtered <- combined_data[apply(combined_data[, genes_OF], 1, function(x) any(x > threshold)), ]
+
+# Only keep the gene expression columns along with 'condition' and 'celltype'
+combined_data_filtered <- combined_data_filtered[, c("condition", "celltype", genes_OF)]
+
+# Melt the data into long format for ggplot
+combined_data_long <- melt(combined_data_filtered, 
+                           id.vars = c("condition", "celltype"),  # Only the columns we want to keep
+                           variable.name = "gene", 
+                           value.name = "expression")
+
+# Generate the ridge plot
+ridge_plot <- ggplot(combined_data_long, aes(x = expression, y = gene, fill = condition)) +
+  geom_density_ridges(scale = 1.25, rel_min_height = 0.01, alpha = 0.5) +  # Adjust the ridge plot scale and density
+  geom_vline(xintercept = 0.5, linetype = "dashed", color = "black", size = 0.8) +  # Add vertical line at 0.5
+  theme_ridges() +  # Ridge theme
+  scale_fill_manual(values = c("control" = "blue", "experimental" = "red")) +  # Define colors for control and experimental
+  theme(legend.position = "right",  # Place the legend on the right
+        strip.background = element_blank(),
+        strip.text = element_text(size = 10)) +  # Adjust facet label text size
+  labs(title = "Gene Expression across B Cell Subpopulations",
+       x = "Expression Level", 
+       y = "Genes")
+
+histogram_plot <- ggplot(combined_data_long, aes(x = expression, fill = condition)) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 100) +  # Increase the number of bins
+  facet_wrap(~ gene, scales = "free_x") +
+  scale_fill_manual(values = c("control" = "blue", "experimental" = "red")) +
+  labs(title = "Gene Expression Distribution across B Cell Subpopulations",
+       x = "Expression Level", y = "Cell Count") +
+  scale_x_continuous(breaks = seq(0, 2, by = 0.1)) +  # Set finer x-axis breaks
+  theme_minimal() +
+  theme(legend.position = "right", 
+        strip.background = element_blank(),
+        strip.text = element_text(size = 10))
+
+cells_above__below_threshold <- combined_data %>%
+  filter(Cd69 >0.5 | Cd83 > 0.5) %>%
+  group_by(condition) %>%
+  summarise(cell_count = n())
+```
+

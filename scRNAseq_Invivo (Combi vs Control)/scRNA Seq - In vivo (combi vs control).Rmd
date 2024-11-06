@@ -1,0 +1,127 @@
+---
+title: "scRNA Seq - in vivo (combi vs control)"
+output: html_document
+date: "2024-11-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Environment Setup}
+library(Seurat)
+hs001_data <- Read10X(data.dir = "E:/Eugene/scRNA_092324/HS001/analysis/240814_HEE_SUNGSOO_2_MOUSE_10X-HS001-cellranger-count-default/HS001_cellranger_count_outs/filtered_feature_bc_matrix")
+hs002_data <- Read10X(data.dir = "E:/Eugene/scRNA_092324/HS002/analysis/240814_HEE_SUNGSOO_2_MOUSE_10X-HS002-cellranger-count-default/HS002_cellranger_count_outs/filtered_feature_bc_matrix")
+hs003_data <- Read10X(data.dir = "E:/Eugene/scRNA_092324/HS003/analysis/240726_HEE_SUNGSOO_2_MOUSE_10X-HS003-cellranger-count-default/HS003_cellranger_count_outs/filtered_feature_bc_matrix")
+hs004_data <- Read10X(data.dir = "E:/Eugene/scRNA_092324/HS004/analysis/240726_HEE_SUNGSOO_2_MOUSE_10X-HS004-cellranger-count-default/HS004_cellranger_count_outs/filtered_feature_bc_matrix")
+
+#make Seurat object 
+hs001 <- CreateSeuratObject(counts = hs001_data, project = "HS001")
+hs002 <- CreateSeuratObject(counts = hs002_data, project = "HS002")
+hs003 <- CreateSeuratObject(counts = hs003_data, project = "HS003")
+hs004 <- CreateSeuratObject(counts = hs004_data, project = "HS004")
+
+hs001$condition <- "control"
+hs002$condition <- "experimental"
+hs003$condition <- "control"
+hs004$condition <- "experimental"
+
+hs001[["percent.mt"]] <- PercentageFeatureSet(hs001, pattern = "^mt-")
+hs002[["percent.mt"]] <- PercentageFeatureSet(hs002, pattern = "^mt-")
+hs003[["percent.mt"]] <- PercentageFeatureSet(hs003, pattern = "^mt-")
+hs004[["percent.mt"]] <- PercentageFeatureSet(hs004, pattern = "^mt-")
+
+hs001 <- subset(hs001, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<5000 &percent.mt<10)
+hs002<- subset(hs002, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<5000 &percent.mt<10)
+hs003<- subset(hs003, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<5000 &percent.mt<10)
+hs004<- subset(hs004, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<5000 &percent.mt<10)
+```
+
+``` {r Subset & Normalize}
+hs001 <- SCTransform(hs001, vars.to.regress = "percent.mt", verbose = T)
+hs002<- SCTransform(hs002, vars.to.regress = "percent.mt", verbose = FALSE)
+hs003<- SCTransform(hs003, vars.to.regress = "percent.mt", verbose = FALSE)
+hs004<- SCTransform(hs004, vars.to.regress = "percent.mt", verbose = FALSE)
+hs_list <- list(hs001, hs002, hs003, hs004)
+```
+
+```{r Integrate, Findneighbors/Findclusters}
+immune_combined.sct <- RunPCA(immune_combined.sct,verbose = FALSE)
+obj.integrated<- IntegrateLayers(immune_combined.sct, 
+                                 method=CCAIntegration,
+                                 normalization.method="SCT", 
+                                 orig.reduction="pca",
+                                 new.reduction="integrated.cca")
+obj.integrated <- FindNeighbors(obj.integrated, dims = 1:30, new.reduction="integrated.cca")
+obj.integrated <- FindClusters(obj.integrated, resolution = 0.3)
+```
+
+```{r Identifying markers}
+t1 <- RunUMAP(
+  obj.integrated,
+  dims = 1:30,
+  min.dist = 0.01,
+  n.neighbors = 50L,
+  spread=2,
+  reduction = "pca"
+)
+p1 <- DimPlot(t1, reduction = "umap", group.by = "seurat_clusters", label=TRUE) 
+### Identify clusters
+DefaultAssay(t1) <- "SCT"
+gene<-c("Krt17")
+p1<-VlnPlot(t1, assay = 'SCT',features =gene, pt.size=0, group.by="seurat_clusters")
+p2<-FeaturePlot(t1, features = gene,cols = c("lightgrey", "#C83232"))
+
+pdf(paste0(path, gene,".pdf"), width = 4, height = 3)
+p2
+dev.off()
+
+
+### Rename Clusters
+Idents(t1) <- "seurat_clusters"
+p3 <- DimPlot(t1, reduction = "umap", label = TRUE, repel=TRUE)
+t1.rename<-t1
+t1.rename <- RenameIdents(t1.rename, 
+                      `0` = "Macrophage", 
+                      `1` = "Cancer Cells", 
+                      `2` = "T Cells", 
+                      `3` = "B Cells",
+                      `4` = "T Cells", 
+                      `5` = "B Cells", 
+                      `6` = "Cancer Cells",
+                      `7` = "NK Cells", 
+                      `8` = "Cancer Cells", 
+                      `9` = "Monocytes", 
+                      `10` = "T Cells",
+                      '11' = "IHC",
+                      '12' = "Stromal",
+                      '13' = "Macrophage",
+                      '14' = "Neutrophils",
+                      '15' = "Fibroblast",
+                      '16' = "Monocytes",
+                      '17' = "Monocytes")
+p4 <- DimPlot(t1.rename, reduction = "umap", split.by="condition",label = TRUE, repel=TRUE)
+saveRDS(t1.rename,"C:/Users/es4218/OneDrive - Columbia University Irving Medical Center/1-5. CDK4i+CDK7i bresat cancer/scRNA-seq/Script/Saves 10042024/seurat_labeled.rds")
+```
+
+```{r Counts}
+t1.rename$celltype <- Idents(t1.rename)
+count_table <- table(t1.rename$condition, Idents(t1.rename))
+```
+
+```{r Figures}
+tempfig<-t1.rename
+gene <- "Nfib"
+# Create a new column in the metadata, marking cells as "Expressed" or "Not Expressed"
+tempfig$gene_expression <- ifelse(tempfig@assays$SCT@data[gene, ] >0, "E", "Not")
+Idents(tempfig) <- "gene_expression"
+
+# Plot the cells, coloring by gene expression status
+library(ggplot2)
+p3 <- DimPlot(
+  object = tempfig,
+  reduction = "umap",
+  cols = c("#B93232", "grey"),  # Gray for 'Not Expressed', solid red for 'Expressed'
+  group.by = "gene_expression"
+)+guides(color = "none")+coord_cartesian(xlim = c(NA, 15), ylim = c(-17.5, NA))
+```
