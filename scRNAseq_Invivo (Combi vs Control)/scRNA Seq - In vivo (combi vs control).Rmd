@@ -31,10 +31,10 @@ hs002[["percent.mt"]] <- PercentageFeatureSet(hs002, pattern = "^mt-")
 hs003[["percent.mt"]] <- PercentageFeatureSet(hs003, pattern = "^mt-")
 hs004[["percent.mt"]] <- PercentageFeatureSet(hs004, pattern = "^mt-")
 
-hs001 <- subset(hs001, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<5000 &percent.mt<10)
-hs002<- subset(hs002, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<5000 &percent.mt<10)
-hs003<- subset(hs003, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<5000 &percent.mt<10)
-hs004<- subset(hs004, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<5000 &percent.mt<10)
+hs001 <- subset(hs001, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<4000 &percent.mt<10)
+hs002<- subset(hs002, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<4000 &percent.mt<10)
+hs003<- subset(hs003, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<4000 &percent.mt<10)
+hs004<- subset(hs004, subset=nCount_RNA>1000& nFeature_RNA>500 & nFeature_RNA<4000 &percent.mt<10)
 ```
 
 ``` {r Subset & Normalize}
